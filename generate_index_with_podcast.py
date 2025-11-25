@@ -107,18 +107,18 @@ def parse_and_simplify_news(news_content: str, max_items_per_platform: int = 10)
 
 
 def generate_podcast_script_with_ai(news_data: list, api_key: str) -> Optional[str]:
-    """使用 OpenRouter DeepSeek V3 生成播客脚本"""
+    """使用 OpenRouter qwen-2.5-72b-instruct 生成播客脚本"""
 
-    # 构建提示词（精简版，只取前5个平台）
+    # 构建提示词, 平台都取，当然用户可以调整 news_data 的数据来减少内容
     news_summary = ""
-    for platform_data in news_data[:5]:
+    for platform_data in news_data:
         platform = platform_data["platform"]
         items = platform_data["items"]
         news_summary += f"\n【{platform}】\n"
         for i, item in enumerate(items, 1):
             news_summary += f"{i}. {item}\n"
 
-    prompt = f"""你是一位专业的播客主播，名字叫严总，需要将以下新闻热点改编成一篇自然、流畅的播客稿。
+    prompt = f"""你是一位专业的播客主播，名字叫小严新闻联播，需要将以下新闻热点改编成一篇自然、流畅的播客稿。
 
 要求：
 1. 语言风格轻松、口语化，像在和朋友聊天
@@ -131,9 +131,9 @@ def generate_podcast_script_with_ai(news_data: list, api_key: str) -> Optional[s
 新闻内容：
 {news_summary}
 
-请直接输出播客稿，不要有其他说明文字。"""
+请直接输出播客稿，不要有其他说明文字，不要用Markdown格式以保证tts友好"""
 
-    print("🤖 正在调用 DeepSeek V3 生成播客脚本...")
+    print("🤖 正在调用 qwen-2.5-72b-instruct 生成播客脚本...")
 
     try:
         response = requests.post(
@@ -143,12 +143,12 @@ def generate_podcast_script_with_ai(news_data: list, api_key: str) -> Optional[s
                 "Content-Type": "application/json",
             },
             json={
-                "model": "deepseek/deepseek-chat",
+                "model": "qwen/qwen-2.5-72b-instruct",  # 使用 Qwen 2.5 72B
                 "messages": [{"role": "user", "content": prompt}],
-                "temperature": 0.7,
-                "max_tokens": 2000,
+                "temperature": 0.8,  # 提高温度让内容更有创意
+                "max_tokens": 3500,  # 增加 token 限制以支持更长内容
             },
-            timeout=60
+            timeout=90  # 增加超时时间
         )
 
         if response.status_code == 200:
