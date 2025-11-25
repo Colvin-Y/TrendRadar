@@ -3,3 +3,9 @@ pytz>=2025.2,<2026.0
 PyYAML>=6.0.3,<7.0.0
 fastmcp>=2.12.0,<2.14.0
 websockets>=13.0,<14.0
+ffmpeg>=1.4
+
+# 播客音频生成相关依赖
+edge-tts>=6.1.0  # 推荐: 免费的微软 TTS
+gTTS>=2.5.0      # 备选: Google TTS
+openai>=1.0.0    # 可选: OpenAI TTS (需要 API Key)

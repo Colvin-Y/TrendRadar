@@ -1692,8 +1692,21 @@ def generate_html_report(
 
     report_data = prepare_report_data(stats, failed_ids, new_titles, id_to_name, mode)
 
+    # 检查对应的音频文件是否存在
+    audio_file = None
+    time_filename = format_time_filename()
+    date_folder = format_date_folder()
+    audio_path = Path("output") / date_folder / "audio" / f"{time_filename}.mp3"
+
+    if audio_path.exists():
+        # 使用相对路径
+        audio_file = f"../audio/{time_filename}.mp3"
+        print(f"找到对应的音频文件: {audio_path}")
+    else:
+        print(f"未找到音频文件: {audio_path}")
+
     html_content = render_html_content(
-        report_data, total_titles, is_daily_summary, mode, update_info
+        report_data, total_titles, is_daily_summary, mode, update_info, audio_file
     )
 
     with open(file_path, "w", encoding="utf-8") as f:
@@ -1713,6 +1726,7 @@ def render_html_content(
     is_daily_summary: bool = False,
     mode: str = "daily",
     update_info: Optional[Dict] = None,
+    audio_file: Optional[str] = None,
 ) -> str:
     """渲染HTML内容"""
     html = """
@@ -1749,6 +1763,43 @@ def render_html_content(
                 padding: 32px 24px;
                 text-align: center;
                 position: relative;
+            }
+
+            .audio-player-container {
+                margin-top: 20px;
+                padding: 16px;
+                background: rgba(255, 255, 255, 0.1);
+                border-radius: 8px;
+                backdrop-filter: blur(10px);
+            }
+
+            .audio-player-label {
+                font-size: 13px;
+                margin-bottom: 8px;
+                opacity: 0.9;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                gap: 6px;
+            }
+
+            .audio-player {
+                width: 100%;
+                max-width: 500px;
+                height: 40px;
+                border-radius: 20px;
+                outline: none;
+            }
+
+            audio::-webkit-media-controls-panel {
+                background-color: rgba(255, 255, 255, 0.2);
+            }
+
+            audio::-webkit-media-controls-play-button,
+            audio::-webkit-media-controls-current-time-display,
+            audio::-webkit-media-controls-time-remaining-display {
+                color: white;
+                filter: brightness(0) invert(1);
             }
             
             .save-buttons {
@@ -2200,9 +2251,27 @@ def render_html_content(
 
     html += """</span>
                     </div>
-                </div>
+                </div>"""
+
+    # 添加音频播放器（如果有音频文件）
+    if audio_file:
+        html += """
+                <div class="audio-player-container">
+                    <div class="audio-player-label">
+                        <span>🎧</span>
+                        <span>播客音频</span>
+                    </div>
+                    <audio controls class="audio-player">
+                        <source src=\""""
+        html += audio_file
+        html += """\" type="audio/mpeg">
+                        您的浏览器不支持音频播放。
+                    </audio>
+                </div>"""
+
+    html += """
             </div>
-            
+
             <div class="content">"""
 
     # 处理失败ID错误信息
