@@ -2,7 +2,7 @@
 # coding=utf-8
 """
 为 GitHub Pages 生成带播客的 index.html
-- 精简版：每个主题取10条新闻
+- 可配置：每个主题的新闻数量、生成的 token 数量
 - 生成播客音频
 - 在 index.html 中集成播放器
 """
@@ -15,6 +15,19 @@ import pytz
 import requests
 from typing import Optional
 import asyncio
+
+# ==================== 配置参数 ====================
+# 可以通过环境变量覆盖这些默认值
+
+# AI 生成配置
+MAX_TOKENS = int(os.environ.get("PODCAST_MAX_TOKENS", "6000"))  # 最大生成 token 数
+TEMPERATURE = float(os.environ.get("PODCAST_TEMPERATURE", "0.8"))  # 生成温度
+
+# 新闻内容配置
+MAX_NEWS_PER_PLATFORM = int(os.environ.get("PODCAST_NEWS_PER_PLATFORM", "10"))  # 每个平台最多取几条新闻
+MAX_PLATFORMS = int(os.environ.get("PODCAST_MAX_PLATFORMS", "999"))  # 最多取几个平台（建议10-15个）
+
+# =================================================
 
 
 def get_beijing_time():
@@ -32,19 +45,23 @@ def ensure_directory_exists(directory: str):
     Path(directory).mkdir(parents=True, exist_ok=True)
 
 
-def read_latest_news_for_summary() -> Optional[str]:
-    """读取最新的新闻文件用于生成摘要"""
+def read_latest_news_for_summary() -> tuple[Optional[str], Optional[str]]:
+    """读取最新的新闻文件用于生成摘要
+
+    Returns:
+        (content, filename): 文件内容和文件名（不含扩展名）
+    """
     date_folder = format_date_folder()
     txt_dir = Path("output") / date_folder / "txt"
 
     if not txt_dir.exists():
         print(f"❌ 目录不存在: {txt_dir}")
-        return None
+        return None, None
 
     txt_files = sorted([f for f in txt_dir.iterdir() if f.suffix == ".txt"])
     if not txt_files:
         print(f"❌ 没有找到txt文件")
-        return None
+        return None, None
 
     latest_file = txt_files[-1]
     print(f"✅ 读取新闻文件: {latest_file.name}")
@@ -52,11 +69,19 @@ def read_latest_news_for_summary() -> Optional[str]:
     with open(latest_file, "r", encoding="utf-8") as f:
         content = f.read()
 
-    return content
+    return content, latest_file.stem
 
 
 def parse_and_simplify_news(news_content: str, max_items_per_platform: int = 10) -> list:
-    """解析并简化新闻内容"""
+    """解析并简化新闻内容，保留链接
+
+    Args:
+        news_content: 新闻文本内容
+        max_items_per_platform: 每个平台最多取几条新闻
+
+    Returns:
+        list: 包含平台和新闻条目的列表，每个新闻包含标题和链接
+    """
     lines = news_content.strip().split("\n")
 
     news_data = []
@@ -87,14 +112,36 @@ def parse_and_simplify_news(news_content: str, max_items_per_platform: int = 10)
 
         elif line[0].isdigit() and ". " in line:
             # 新闻条目行
-            title = line.split(". ", 1)[1]
-            # 移除URL链接部分
+            full_line = line.split(". ", 1)[1]
+
+            # 提取标题和链接
+            title = full_line
+            url = ""
+
+            # 提取 URL
+            if "[URL:" in full_line:
+                parts = full_line.split("[URL:")
+                title = parts[0].strip()
+                url_part = parts[1].split("]")[0].strip()
+                url = url_part
+
+            # 如果没有 URL，尝试提取 MOBILE
+            if not url and "[MOBILE:" in full_line:
+                parts = full_line.split("[MOBILE:")
+                title = parts[0].strip()
+                url_part = parts[1].split("]")[0].strip()
+                url = url_part
+
+            # 清理标题中残留的链接标记
             if "[URL:" in title:
                 title = title.split("[URL:")[0].strip()
             if "[MOBILE:" in title:
                 title = title.split("[MOBILE:")[0].strip()
 
-            current_platform_news.append(title)
+            current_platform_news.append({
+                "title": title,
+                "url": url
+            })
 
     # 处理最后一个平台
     if current_platform_news and current_platform:
@@ -106,17 +153,35 @@ def parse_and_simplify_news(news_content: str, max_items_per_platform: int = 10)
     return news_data
 
 
-def generate_podcast_script_with_ai(news_data: list, api_key: str) -> Optional[str]:
-    """使用 OpenRouter qwen-2.5-72b-instruct 生成播客脚本"""
+def generate_podcast_script_with_ai(news_data: list, api_key: str, max_tokens: int = MAX_TOKENS) -> Optional[str]:
+    """使用 OpenRouter qwen-2.5-72b-instruct 生成播客脚本
 
-    # 构建提示词, 平台都取，当然用户可以调整 news_data 的数据来减少内容
+    Args:
+        news_data: 解析后的新闻数据
+        api_key: OpenRouter API Key
+        max_tokens: 最大生成 token 数
+    """
+
+    # 构建提示词，限制平台数量
     news_summary = ""
-    for platform_data in news_data:
+    platforms_count = min(len(news_data), MAX_PLATFORMS)
+
+    for platform_data in news_data[:platforms_count]:
         platform = platform_data["platform"]
         items = platform_data["items"]
         news_summary += f"\n【{platform}】\n"
         for i, item in enumerate(items, 1):
-            news_summary += f"{i}. {item}\n"
+            title = item["title"] if isinstance(item, dict) else item
+            url = item.get("url", "") if isinstance(item, dict) else ""
+
+            # 包含链接信息（如果有）
+            if url:
+                news_summary += f"{i}. {title} (链接: {url})\n"
+            else:
+                news_summary += f"{i}. {title}\n"
+
+    # 估算目标字数（基于 max_tokens）
+    estimated_words = int(max_tokens * 0.6)  # 粗略估算中文字数
 
     prompt = f"""你是一位专业的播客主播，名字叫小严新闻联播，需要将以下新闻热点改编成一篇自然、流畅的播客稿。
 
@@ -125,16 +190,18 @@ def generate_podcast_script_with_ai(news_data: list, api_key: str) -> Optional[s
 2. 每条新闻要简洁精炼，突出关键信息
 3. 平台之间的过渡要自然
 4. 开头要有欢迎语，结尾要有总结
-5. 总时长控制在5-10分钟（约1200-2400字）
-6. 避免使用过度专业的术语确保播客内容对一般听众也有价值
-
+5. 目标字数约 {estimated_words} 字左右
+6. 避免使用过度专业的术语，确保播客内容对一般听众也有价值
+7. 不要提及链接URL，这些链接仅供你理解新闻背景
 
 新闻内容：
 {news_summary}
 
-请直接输出播客稿，不要有其他说明文字，不要用Markdown格式以保证tts友好"""
+请直接输出播客稿，不要有其他说明文字，不要用Markdown格式以保证TTS友好。"""
 
-    print("🤖 正在调用 qwen-2.5-72b-instruct 生成播客脚本...")
+    print(f"🤖 正在调用 Qwen 2.5 72B 生成播客脚本...")
+    print(f"📊 配置: {platforms_count}个平台, 每平台{MAX_NEWS_PER_PLATFORM}条新闻, max_tokens={max_tokens}")
+    print(f"📏 提示词长度: {len(prompt)} 字符")
 
     try:
         response = requests.post(
@@ -146,23 +213,38 @@ def generate_podcast_script_with_ai(news_data: list, api_key: str) -> Optional[s
             json={
                 "model": "qwen/qwen-2.5-72b-instruct",  # 使用 Qwen 2.5 72B
                 "messages": [{"role": "user", "content": prompt}],
-                "temperature": 0.8,  # 提高温度让内容更有创意
-                "max_tokens": 3500,  # 增加 token 限制以支持更长内容
+                "temperature": TEMPERATURE,  # 可配置的温度
+                "max_tokens": max_tokens,  # 可配置的最大 token 数
             },
-            timeout=90  # 增加超时时间
+            timeout=120  # 增加超时时间
         )
 
         if response.status_code == 200:
             result = response.json()
-            script = result["choices"][0]["message"]["content"]
-            print("✅ AI 脚本生成成功")
-            return script
+
+            # 调试：打印响应结构
+            if "choices" in result and len(result["choices"]) > 0:
+                script = result["choices"][0]["message"]["content"]
+                print(f"✅ AI 脚本生成成功，长度: {len(script)} 字符")
+
+                if not script or len(script) == 0:
+                    print("⚠️  警告: 脚本内容为空!")
+                    print(f"完整响应: {result}")
+                    return None
+
+                return script
+            else:
+                print(f"❌ 响应格式异常: {result}")
+                return None
         else:
             print(f"❌ API 调用失败: {response.status_code}")
+            print(f"响应内容: {response.text}")
             return None
 
     except Exception as e:
         print(f"❌ 生成脚本时出错: {e}")
+        import traceback
+        traceback.print_exc()
         return None
 
 
@@ -273,6 +355,12 @@ def main():
     print("=" * 60)
     print("🎙️  生成带播客的 index.html for GitHub Pages")
     print("=" * 60)
+    print(f"\n⚙️  当前配置:")
+    print(f"   - 每个平台最多新闻数: {MAX_NEWS_PER_PLATFORM}")
+    print(f"   - 最多平台数: {MAX_PLATFORMS if MAX_PLATFORMS < 999 else '全部'}")
+    print(f"   - AI 最大 tokens: {MAX_TOKENS}")
+    print(f"   - AI 温度: {TEMPERATURE}")
+    print()
 
     # 1. 检查 API Key
     api_key = os.environ.get("OPENROUTER_API_KEY", "")
@@ -281,14 +369,14 @@ def main():
         return 1
 
     # 2. 读取最新新闻
-    news_content = read_latest_news_for_summary()
+    news_content, news_filename = read_latest_news_for_summary()
     if not news_content:
         print("❌ 无法读取新闻内容")
         return 1
 
-    # 3. 解析并简化新闻（每个平台取10条）
-    print("📝 解析新闻内容（每个平台取10条）...")
-    news_data = parse_and_simplify_news(news_content, max_items_per_platform=10)
+    # 3. 解析并简化新闻
+    print(f"📝 解析新闻内容（每个平台取{MAX_NEWS_PER_PLATFORM}条）...")
+    news_data = parse_and_simplify_news(news_content, max_items_per_platform=MAX_NEWS_PER_PLATFORM)
     print(f"✅ 解析到 {len(news_data)} 个平台的新闻")
 
     # 4. 准备音频文件路径
@@ -301,7 +389,7 @@ def main():
     script_path = audio_dir / "podcast_script.txt"
 
     # 5. 生成播客脚本
-    script = generate_podcast_script_with_ai(news_data, api_key)
+    script = generate_podcast_script_with_ai(news_data, api_key, max_tokens=MAX_TOKENS)
     if not script:
         print("❌ 脚本生成失败")
         return 1
