@@ -189,56 +189,83 @@ def generate_audio_with_edge_tts(script: str, output_path: Path) -> bool:
         return False
 
 
-def generate_index_html_with_podcast(news_data: list, audio_filename: str):
-    """生成带播客的 index.html"""
-    from main import render_html_content, prepare_report_data
+def inject_audio_player_to_index(audio_filename: str):
+    """将音频播放器注入到现有的 index.html 中"""
 
-    # 将简化的新闻数据转换为 stats 格式
-    stats = []
-    for platform_data in news_data:
-        for idx, title in enumerate(platform_data["items"]):
-            stats.append({
-                'word': title[:20],  # 取标题前20字作为关键词
-                'count': 1,
-                'position': idx,
-                'percentage': 100.0,
-                'titles': [{
-                    'title': title,
-                    'source_name': platform_data["platform"],
-                    'first_time': get_beijing_time().strftime("%H时%M分"),
-                    'last_time': get_beijing_time().strftime("%H时%M分"),
-                    'time_display': get_beijing_time().strftime("%H时%M分"),
-                    'count': 1,
-                    'ranks': [idx + 1],
-                    'rank_threshold': 10,
-                    'url': '',
-                    'mobileUrl': '',
-                    'is_new': False
-                }]
-            })
+    index_path = Path("index.html")
 
-    total_titles = sum(len(p["items"]) for p in news_data)
+    if not index_path.exists():
+        print("❌ index.html 不存在，请先运行 main.py 生成")
+        return False
 
-    report_data = prepare_report_data(stats, None, None, None, "daily")
+    # 读取现有的 index.html
+    with open(index_path, "r", encoding="utf-8") as f:
+        html_content = f.read()
 
-    # 设置音频文件路径（相对于 index.html）
+    # 检查是否已经有音频播放器
+    if "audio-player-container" in html_content and audio_filename in html_content:
+        print("✅ index.html 已包含音频播放器，无需重复添加")
+        return True
+
+    # 构建音频播放器 HTML
     date_folder = format_date_folder()
-    audio_file = f"output/{date_folder}/audio/{audio_filename}"
+    audio_path = f"output/{date_folder}/audio/{audio_filename}"
 
-    html_content = render_html_content(
-        report_data,
-        total_titles,
-        is_daily_summary=False,  # 改为 False，这样会显示播放器
-        mode="daily",
-        update_info=None,
-        audio_file=audio_file
-    )
+    audio_player_html = f"""
+                <div class="audio-player-container">
+                    <div class="audio-player-label">
+                        <span>🎧</span>
+                        <span>播客音频</span>
+                    </div>
+                    <audio controls class="audio-player">
+                        <source src="{audio_path}" type="audio/mpeg">
+                        您的浏览器不支持音频播放。
+                    </audio>
+                </div>"""
 
-    # 写入 index.html
-    with open("index.html", "w", encoding="utf-8") as f:
-        f.write(html_content)
+    # 查找插入位置：在 </div> 之前（header 的结束位置）
+    # 寻找包含 "生成时间" 后的第一个 </div></div>
+    import re
 
-    print(f"✅ index.html 已生成（包含音频播放器）")
+    # 方法1: 在 header div 结束前插入
+    pattern = r'(生成时间.*?</div>\s*</div>\s*</div>)'
+
+    if re.search(pattern, html_content, re.DOTALL):
+        # 在匹配的位置前插入音频播放器
+        html_content = re.sub(
+            pattern,
+            lambda m: m.group(1).replace('</div>\n            </div>',
+                                        audio_player_html + '\n            </div>\n            </div>'),
+            html_content,
+            count=1,
+            flags=re.DOTALL
+        )
+
+        # 写回文件
+        with open(index_path, "w", encoding="utf-8") as f:
+            f.write(html_content)
+
+        print(f"✅ 音频播放器已成功注入到 index.html")
+        return True
+    else:
+        print("⚠️  未找到合适的插入位置，尝试备用方案...")
+
+        # 备用方案：在 <div class="content"> 之前插入
+        if '<div class="content">' in html_content:
+            html_content = html_content.replace(
+                '<div class="content">',
+                f'            </div>{audio_player_html}\n            \n            <div class="content">',
+                1
+            )
+
+            with open(index_path, "w", encoding="utf-8") as f:
+                f.write(html_content)
+
+            print(f"✅ 音频播放器已成功注入到 index.html（备用位置）")
+            return True
+        else:
+            print("❌ 无法找到插入位置")
+            return False
 
 
 def main():
@@ -292,9 +319,9 @@ def main():
         # 创建一个空文件占位
         audio_path.touch()
 
-    # 7. 生成 index.html
-    print("📄 生成 index.html...")
-    generate_index_html_with_podcast(news_data, audio_filename)
+    # 7. 将音频播放器注入到现有的 index.html
+    print("📄 注入音频播放器到 index.html...")
+    inject_audio_player_to_index(audio_filename)
 
     # 8. 完成
     print("\n" + "=" * 60)
