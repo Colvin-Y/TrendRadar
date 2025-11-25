@@ -67,7 +67,7 @@ jobs:
           GITHUB_ACTIONS: true
         run: |
           python main.py
-          find output -name "*.mp3" -type f -print0 | xargs -0 rm
+          find output -name "*.mp3" -type f -delete
           python generate_index_with_podcast.py
 
       - name: Commit and push if changes
