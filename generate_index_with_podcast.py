@@ -1,18 +1,20 @@
 #!/usr/bin/env python3
 # coding=utf-8
 """
-自动化音频生成脚本 (适用于 GitHub Actions)
-使用 OpenRouter (DeepSeek V3) + Edge TTS 自动生成播客
+为 GitHub Pages 生成带播客的 index.html
+- 精简版：每个主题取10条新闻
+- 生成播客音频
+- 在 index.html 中集成播放器
 """
 
 import os
 import sys
-import json
 from pathlib import Path
 from datetime import datetime
 import pytz
 import requests
-from typing import Optional, Tuple
+from typing import Optional
+import asyncio
 
 
 def get_beijing_time():
@@ -25,41 +27,36 @@ def format_date_folder():
     return get_beijing_time().strftime("%Y年%m月%d日")
 
 
-def format_time_filename():
-    """格式化时间文件名"""
-    return get_beijing_time().strftime("%H时%M分")
-
-
 def ensure_directory_exists(directory: str):
     """确保目录存在"""
     Path(directory).mkdir(parents=True, exist_ok=True)
 
 
-def read_latest_news_file() -> Tuple[Optional[str], Optional[str]]:
-    """读取最新的新闻txt文件"""
+def read_latest_news_for_summary() -> Optional[str]:
+    """读取最新的新闻文件用于生成摘要"""
     date_folder = format_date_folder()
     txt_dir = Path("output") / date_folder / "txt"
 
     if not txt_dir.exists():
-        print(f"❌ 错误: 目录不存在 {txt_dir}")
-        return None, None
+        print(f"❌ 目录不存在: {txt_dir}")
+        return None
 
     txt_files = sorted([f for f in txt_dir.iterdir() if f.suffix == ".txt"])
     if not txt_files:
-        print(f"❌ 错误: 在 {txt_dir} 中没有找到txt文件")
-        return None, None
+        print(f"❌ 没有找到txt文件")
+        return None
 
     latest_file = txt_files[-1]
-    print(f"✅ 找到最新新闻文件: {latest_file}")
+    print(f"✅ 读取新闻文件: {latest_file.name}")
 
     with open(latest_file, "r", encoding="utf-8") as f:
         content = f.read()
 
-    return content, latest_file.stem
+    return content
 
 
-def parse_news_content(news_content: str) -> list:
-    """解析新闻内容，提取关键信息"""
+def parse_and_simplify_news(news_content: str, max_items_per_platform: int = 10) -> list:
+    """解析并简化新闻内容"""
     lines = news_content.strip().split("\n")
 
     news_data = []
@@ -77,7 +74,7 @@ def parse_news_content(news_content: str) -> list:
             if current_platform_news and current_platform:
                 news_data.append({
                     "platform": current_platform,
-                    "items": current_platform_news[:10]  # 只取前10条
+                    "items": current_platform_news[:max_items_per_platform]
                 })
                 current_platform_news = []
 
@@ -103,7 +100,7 @@ def parse_news_content(news_content: str) -> list:
     if current_platform_news and current_platform:
         news_data.append({
             "platform": current_platform,
-            "items": current_platform_news[:5]
+            "items": current_platform_news[:max_items_per_platform]
         })
 
     return news_data
@@ -112,23 +109,23 @@ def parse_news_content(news_content: str) -> list:
 def generate_podcast_script_with_ai(news_data: list, api_key: str) -> Optional[str]:
     """使用 OpenRouter DeepSeek V3 生成播客脚本"""
 
-    # 构建提示词
+    # 构建提示词（精简版，只取前5个平台）
     news_summary = ""
-    for platform_data in news_data[:5]:  # 只取前5个平台
+    for platform_data in news_data[:5]:
         platform = platform_data["platform"]
         items = platform_data["items"]
         news_summary += f"\n【{platform}】\n"
         for i, item in enumerate(items, 1):
             news_summary += f"{i}. {item}\n"
 
-    prompt = f"""你是一位专业的播客主播，需要将以下新闻热点改编成一篇自然、流畅的播客稿。
+    prompt = f"""你是一位专业的播客主播，名字叫严总，需要将以下新闻热点改编成一篇自然、流畅的播客稿。
 
 要求：
 1. 语言风格轻松、口语化，像在和朋友聊天
 2. 每条新闻要简洁精炼，突出关键信息
 3. 平台之间的过渡要自然
 4. 开头要有欢迎语，结尾要有总结
-5. 总时长控制在5-10分钟（约1200-2400字）
+5. 总时长控制在3-5分钟（约800-1200字）
 6. 不要使用太多书面语，要像真人在说话
 
 新闻内容：
@@ -136,7 +133,7 @@ def generate_podcast_script_with_ai(news_data: list, api_key: str) -> Optional[s
 
 请直接输出播客稿，不要有其他说明文字。"""
 
-    print("🤖 正在调用 OpenRouter DeepSeek V3 生成播客脚本...")
+    print("🤖 正在调用 DeepSeek V3 生成播客脚本...")
 
     try:
         response = requests.post(
@@ -147,12 +144,7 @@ def generate_podcast_script_with_ai(news_data: list, api_key: str) -> Optional[s
             },
             json={
                 "model": "deepseek/deepseek-chat",
-                "messages": [
-                    {
-                        "role": "user",
-                        "content": prompt
-                    }
-                ],
+                "messages": [{"role": "user", "content": prompt}],
                 "temperature": 0.7,
                 "max_tokens": 2000,
             },
@@ -166,29 +158,21 @@ def generate_podcast_script_with_ai(news_data: list, api_key: str) -> Optional[s
             return script
         else:
             print(f"❌ API 调用失败: {response.status_code}")
-            print(f"响应: {response.text}")
             return None
 
     except Exception as e:
         print(f"❌ 生成脚本时出错: {e}")
-        import traceback
-        traceback.print_exc()
         return None
 
 
 def generate_audio_with_edge_tts(script: str, output_path: Path) -> bool:
-    """使用 Edge TTS 生成音频（免费方案）"""
+    """使用 Edge TTS 生成音频"""
     try:
         print("🎙️  使用 Edge TTS 生成音频...")
 
-        import asyncio
         import edge_tts
 
         async def generate():
-            # 中文语音选项
-            # zh-CN-XiaoxiaoNeural - 女声，温柔
-            # zh-CN-YunxiNeural - 男声，沉稳
-            # zh-CN-YunyangNeural - 男声，新闻播报风格
             communicate = edge_tts.Communicate(script, "zh-CN-YunyangNeural")
             await communicate.save(str(output_path))
 
@@ -197,63 +181,101 @@ def generate_audio_with_edge_tts(script: str, output_path: Path) -> bool:
         return True
 
     except ImportError:
-        print("⚠️  edge-tts 未安装，请运行: pip install edge-tts")
+        print("⚠️  edge-tts 未安装，跳过音频生成")
         return False
     except Exception as e:
         print(f"❌ 生成音频时出错: {e}")
-        import traceback
-        traceback.print_exc()
         return False
 
 
+def generate_index_html_with_podcast(news_data: list, audio_filename: str):
+    """生成带播客的 index.html"""
+    from main import render_html_content, prepare_report_data
+
+    # 将简化的新闻数据转换为 stats 格式
+    stats = []
+    for platform_data in news_data:
+        for idx, title in enumerate(platform_data["items"]):
+            stats.append({
+                'word': title[:20],  # 取标题前20字作为关键词
+                'count': 1,
+                'position': idx,
+                'percentage': 100.0,
+                'titles': [{
+                    'title': title,
+                    'source_name': platform_data["platform"],
+                    'first_time': get_beijing_time().strftime("%H时%M分"),
+                    'last_time': get_beijing_time().strftime("%H时%M分"),
+                    'time_display': get_beijing_time().strftime("%H时%M分"),
+                    'count': 1,
+                    'ranks': [idx + 1],
+                    'rank_threshold': 10,
+                    'url': '',
+                    'mobileUrl': '',
+                    'is_new': False
+                }]
+            })
+
+    total_titles = sum(len(p["items"]) for p in news_data)
+
+    report_data = prepare_report_data(stats, None, None, None, "daily")
+
+    # 设置音频文件路径（相对于 index.html）
+    date_folder = format_date_folder()
+    audio_file = f"output/{date_folder}/audio/{audio_filename}"
+
+    html_content = render_html_content(
+        report_data,
+        total_titles,
+        is_daily_summary=False,  # 改为 False，这样会显示播放器
+        mode="daily",
+        update_info=None,
+        audio_file=audio_file
+    )
+
+    # 写入 index.html
+    with open("index.html", "w", encoding="utf-8") as f:
+        f.write(html_content)
+
+    print(f"✅ index.html 已生成（包含音频播放器）")
+
+
 def main():
-    """主函数 - 自动化执行"""
+    """主函数"""
     print("=" * 60)
-    print("🎙️  TrendRadar 播客音频自动生成")
+    print("🎙️  生成带播客的 index.html for GitHub Pages")
     print("=" * 60)
 
-    # 从环境变量获取 API Key
-    openrouter_key = os.environ.get("OPENROUTER_API_KEY", "")
-    if not openrouter_key:
+    # 1. 检查 API Key
+    api_key = os.environ.get("OPENROUTER_API_KEY", "")
+    if not api_key:
         print("❌ 错误: 未找到 OPENROUTER_API_KEY 环境变量")
-        print("请在 GitHub Secrets 中配置或在本地设置环境变量")
         return 1
 
-    # 读取最新的新闻文件
-    news_content, time_filename = read_latest_news_file()
-
+    # 2. 读取最新新闻
+    news_content = read_latest_news_for_summary()
     if not news_content:
-        print("❌ 无法读取新闻内容,程序退出")
+        print("❌ 无法读取新闻内容")
         return 1
 
-    # 解析新闻数据
-    print("📝 正在解析新闻内容...")
-    news_data = parse_news_content(news_content)
-
-    if not news_data:
-        print("❌ 未能解析出有效的新闻数据")
-        return 1
-
+    # 3. 解析并简化新闻（每个平台取10条）
+    print("📝 解析新闻内容（每个平台取10条）...")
+    news_data = parse_and_simplify_news(news_content, max_items_per_platform=10)
     print(f"✅ 解析到 {len(news_data)} 个平台的新闻")
 
-    # 准备输出路径
+    # 4. 准备音频文件路径
     date_folder = format_date_folder()
     audio_dir = Path("output") / date_folder / "audio"
     ensure_directory_exists(str(audio_dir))
 
-    if not time_filename:
-        time_filename = format_time_filename()
+    audio_filename = "podcast.mp3"  # 固定文件名
+    audio_path = audio_dir / audio_filename
+    script_path = audio_dir / "podcast_script.txt"
 
-    output_path = audio_dir / f"{time_filename}.mp3"
-    script_path = audio_dir / f"{time_filename}_script.txt"
-
-    print(f"📂 输出路径: {output_path}")
-
-    # 使用 AI 生成播客脚本
-    script = generate_podcast_script_with_ai(news_data, openrouter_key)
-
+    # 5. 生成播客脚本
+    script = generate_podcast_script_with_ai(news_data, api_key)
     if not script:
-        print("❌ 脚本生成失败,程序退出")
+        print("❌ 脚本生成失败")
         return 1
 
     # 保存脚本
@@ -261,22 +283,29 @@ def main():
         f.write(script)
     print(f"✅ 播客脚本已保存: {script_path}")
 
-    # 自动使用 Edge TTS 生成音频
-    success = generate_audio_with_edge_tts(script, output_path)
+    # 6. 生成音频
+    audio_generated = generate_audio_with_edge_tts(script, audio_path)
 
-    if success:
-        print("\n" + "=" * 60)
-        print("✅ 处理完成!")
-        print("=" * 60)
-        print(f"📝 脚本文件: {script_path}")
-        print(f"🎵 音频文件: {output_path}")
-        if output_path.exists():
-            print(f"📊 文件大小: {output_path.stat().st_size / 1024:.2f} KB")
-        return 0
-    else:
-        print("\n⚠️  音频生成失败，但脚本已保存")
-        print(f"📝 脚本文件: {script_path}")
-        return 1
+    if not audio_generated:
+        print("⚠️  音频生成失败，但会继续生成 HTML")
+        # 创建一个空文件占位
+        audio_path.touch()
+
+    # 7. 生成 index.html
+    print("📄 生成 index.html...")
+    generate_index_html_with_podcast(news_data, audio_filename)
+
+    # 8. 完成
+    print("\n" + "=" * 60)
+    print("✅ 完成！")
+    print("=" * 60)
+    print(f"📝 播客脚本: {script_path}")
+    if audio_path.exists():
+        print(f"🎵 音频文件: {audio_path} ({audio_path.stat().st_size / 1024:.1f} KB)")
+    print(f"📄 首页: index.html")
+    print("\n💡 index.html 已包含音频播放器，可直接部署到 GitHub Pages")
+
+    return 0
 
 
 if __name__ == "__main__":

@@ -1,25 +1,52 @@
 # 快速开始 - 播客功能
 
-## 30秒快速开始
+## 🚀 一键运行（推荐）
+
+```bash
+# 设置 API Key
+export OPENROUTER_API_KEY="your-api-key"
+
+# 一键运行（包含爬虫、播客生成、HTML集成）
+python run_with_podcast.py
+```
+
+就这么简单！打开 `index.html` 即可看到带音频播放器的新闻报告。
+
+---
+
+## 📋 分步运行（了解原理）
 
 ```bash
 # 1. 设置 API Key
-export OPENROUTER_API_KEY=""
+export OPENROUTER_API_KEY="your-api-key"
 
-# 2. 安装 TTS 依赖
+# 2. 安装 TTS 依赖（首次运行需要）
 pip install edge-tts
 
-# 3. 运行爬虫
+# 3. 运行爬虫（生成新闻数据）
 python main.py
 
-# 4. 生成播客
+# 4. 生成播客（生成音频文件）
 python generate_podcast_auto.py
 
-# 5. 重新生成 HTML
+# 5. 重新生成 HTML（集成音频播放器）⭐ 重要！
 python main.py
+
 ```
 
-打开生成的 `index.html` 或最新的HTML文件，你会在页面顶部看到播客播放器！
+**关键**：第5步（重新运行 main.py）是必需的！这一步会检测音频文件并将播放器集成到 HTML 中。
+
+打开生成的 `index.html`，你会在页面顶部看到播客播放器！
+
+## ❓ 为什么需要运行两次 main.py？
+
+第一次运行：生成新闻数据（txt 和 html）
+          ↓
+生成播客：根据 txt 生成音频文件（mp3）
+          ↓
+第二次运行：检测到音频文件，在 HTML 中添加播放器 ⭐
+
+**原理**：HTML 生成时会检查是否存在对应的音频文件，如果存在就自动添加播放器。
 
 ## 效果预览
 

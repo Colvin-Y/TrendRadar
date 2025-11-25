@@ -1694,16 +1694,23 @@ def generate_html_report(
 
     # 检查对应的音频文件是否存在
     audio_file = None
-    time_filename = format_time_filename()
-    date_folder = format_date_folder()
-    audio_path = Path("output") / date_folder / "audio" / f"{time_filename}.mp3"
-
-    if audio_path.exists():
-        # 使用相对路径
-        audio_file = f"../audio/{time_filename}.mp3"
-        print(f"找到对应的音频文件: {audio_path}")
+    # 使用与HTML文件相同的时间标识，而不是当前时间
+    # 这样可以确保 HTML 文件和音频文件的时间戳一致
+    if is_daily_summary:
+        # 汇总文件不需要音频（因为是汇总多个时间段的）
+        audio_file = None
     else:
-        print(f"未找到音频文件: {audio_path}")
+        # 从filename中提取时间（如 "20时09分.html" -> "20时09分"）
+        time_filename = filename.replace(".html", "")
+        date_folder = format_date_folder()
+        audio_path = Path("output") / date_folder / "audio" / f"{time_filename}.mp3"
+
+        if audio_path.exists():
+            # 使用相对路径
+            audio_file = f"../audio/{time_filename}.mp3"
+            print(f"找到对应的音频文件: {audio_path}")
+        else:
+            print(f"未找到音频文件: {audio_path}")
 
     html_content = render_html_content(
         report_data, total_titles, is_daily_summary, mode, update_info, audio_file

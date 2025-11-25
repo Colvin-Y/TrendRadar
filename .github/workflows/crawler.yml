@@ -67,8 +67,8 @@ jobs:
           GITHUB_ACTIONS: true
         run: |
           python main.py
-          python generate_podcast_auto.py || echo "Podcast generation failed"
-          python main.py
+          find output -name "*.mp3" -type f -print0 | xargs -0 rm
+          python generate_index_with_podcast.py
 
       - name: Commit and push if changes
         run: |
