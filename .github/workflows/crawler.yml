@@ -66,8 +66,9 @@ jobs:
           OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
           GITHUB_ACTIONS: true
         run: |
-          python main.py
           find output -name "*.mp3" -type f -delete
+          find output -name "*_script.txt" -type f -delete
+          python main.py
           python generate_index_with_podcast.py
 
       - name: Commit and push if changes
