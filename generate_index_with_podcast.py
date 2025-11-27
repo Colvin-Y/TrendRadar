@@ -399,8 +399,16 @@ def main():
         f.write(script)
     print(f"✅ 播客脚本已保存: {script_path}")
 
-    # 6. 生成音频
-    audio_generated = generate_audio_with_edge_tts(script, audio_path)
+    # 6. 生成音频, 如果失败重试 3 次
+    max_retries = 3
+    for attempt in range(max_retries):
+        audio_generated = generate_audio_with_edge_tts(script, audio_path)
+
+        if audio_generated:
+            print(f"✅ 音频文件已生成: {audio_path} ({audio_path.stat().st_size / 1024:.1f} KB)")
+            break
+        else:
+            print(f"⚠️  第 {attempt + 1} 次音频生成失败，重试中...")
 
     if not audio_generated:
         print("⚠️  音频生成失败，但会继续生成 HTML")
