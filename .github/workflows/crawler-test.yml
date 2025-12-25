@@ -1,4 +1,4 @@
-name: Hot News Crawler
+name: Hot News Crawler Test
 
 on:
   schedule:
